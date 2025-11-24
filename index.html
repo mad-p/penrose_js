@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Penrose Tiling Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            max-width: 320px;
+            z-index: 1000;
+        }
+
+        #controls.minimized .panel-content {
+            display: none;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .panel-header h2 {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .toggle-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .toggle-btn:hover {
+            background: #45a049;
+        }
+
+        .panel-content {
+            display: block;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .control-group input[type="number"],
+        .control-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .control-group input[type="checkbox"] {
+            margin-right: 5px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        #redrawBtn {
+            background: #4CAF50;
+            color: white;
+        }
+
+        #redrawBtn:hover {
+            background: #45a049;
+        }
+
+        #resetBtn {
+            background: #f44336;
+            color: white;
+        }
+
+        #resetBtn:hover {
+            background: #da190b;
+        }
+
+        .info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div id="controls">
+        <div class="panel-header" onclick="togglePanel()">
+            <h2>Penrose Tiling</h2>
+            <button class="toggle-btn" id="toggleBtn">−</button>
+        </div>
+
+        <div class="panel-content">
+            <div class="control-group">
+                <label for="symmetry">Symmetry (fold):</label>
+                <input type="number" id="symmetry" min="3" max="12" value="5">
+            </div>
+
+            <div class="control-group">
+                <label for="maxmax">Number of lines:</label>
+                <input type="number" id="maxmax" min="10" max="100" value="30">
+            </div>
+
+            <div class="control-group">
+                <label for="magnify">Magnification:</label>
+                <input type="number" id="magnify" min="0.1" max="5" step="0.1" value="1.0">
+            </div>
+
+            <div class="control-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="fillPolygons" checked>
+                    Fill polygons
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="colorByType" checked>
+                    Color by polygon type
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label for="midpointType">Midpoint decoration:</label>
+                <select id="midpointType">
+                    <option value="0">None</option>
+                    <option value="1">Acute angle sides</option>
+                    <option value="2">Obtuse angle sides</option>
+                    <option value="3">Cross pattern</option>
+                    <option value="4">Rectangle</option>
+                </select>
+            </div>
+
+            <div class="btn-group">
+                <button id="redrawBtn">Redraw</button>
+                <button id="resetBtn">Reset</button>
+            </div>
+
+            <div class="info">
+                Based on Eric Weeks' quasi.c<br>
+                Color mapping by S J King
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize canvas to window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            draw();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Panel toggle
+        function togglePanel() {
+            const controls = document.getElementById('controls');
+            const toggleBtn = document.getElementById('toggleBtn');
+            controls.classList.toggle('minimized');
+            toggleBtn.textContent = controls.classList.contains('minimized') ? '+' : '−';
+        }
+
+        // Get parameters from UI
+        function getParams() {
+            return {
+                symmetry: parseInt(document.getElementById('symmetry').value),
+                maxmax: parseInt(document.getElementById('maxmax').value),
+                magnify: parseFloat(document.getElementById('magnify').value),
+                fillPolygons: document.getElementById('fillPolygons').checked,
+                colorByType: document.getElementById('colorByType').checked,
+                midpointType: parseInt(document.getElementById('midpointType').value)
+            };
+        }
+
+        // Reset to defaults
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            document.getElementById('symmetry').value = 5;
+            document.getElementById('maxmax').value = 30;
+            document.getElementById('magnify').value = 1.0;
+            document.getElementById('fillPolygons').checked = true;
+            document.getElementById('colorByType').checked = true;
+            document.getElementById('midpointType').value = 0;
+            draw();
+        });
+
+        // Redraw button
+        document.getElementById('redrawBtn').addEventListener('click', draw);
+
+        // Color functions from S J King
+        function phi(n) {
+            return 2 * Math.PI * n;
+        }
+
+        function theta(n) {
+            const curPhi = phi(n);
+            return (Math.PI / 2) * Math.sin(3 * curPhi) + Math.PI / 2;
+        }
+
+        function rcolour(n) {
+            const curPhi = phi(n);
+            const curTheta = theta(n);
+            return 0.5 * Math.sin(curTheta) * Math.cos(curPhi) + 0.5;
+        }
+
+        function gcolour(n) {
+            const curPhi = phi(n);
+            const curTheta = theta(n);
+            return 0.5 * Math.sin(curTheta) * Math.sin(curPhi) + 0.5;
+        }
+
+        function bcolour(n) {
+            const curTheta = theta(n);
+            return 0.5 * Math.cos(curTheta) + 0.5;
+        }
+
+        // Main drawing function
+        function draw() {
+            const params = getParams();
+            const { symmetry, maxmax, magnify, fillPolygons, colorByType, midpointType } = params;
+
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate window and scale
+            const window_size = 20.0 / magnify;
+            const scale = Math.min(canvas.width, canvas.height) / window_size;
+            const xcen = 0.0;
+            const ycen = 0.0;
+
+            // Initialize vectors and intercepts
+            const vx = [];
+            const vy = [];
+            const mm = [];
+            const b = [];
+
+            const halfmax = Math.floor(maxmax / 2);
+
+            for (let t = 0; t < symmetry; t++) {
+                const phiAngle = (t * 2.0) / symmetry * Math.PI;
+                vx[t] = Math.cos(phiAngle);
+                vy[t] = Math.sin(phiAngle);
+                mm[t] = vy[t] / vx[t];
+                b[t] = [];
+
+                for (let r = 0; r < maxmax; r++) {
+                    const y1 = vy[t] * (t * 0.1132) - vx[t] * (r - halfmax);
+                    const x1 = vx[t] * (t * 0.2137) + vy[t] * (r - halfmax);
+                    b[t][r] = y1 - mm[t] * x1;
+                }
+            }
+
+            // Plot function
+            function plotPoint(x, y) {
+                const dx = (x - xcen) / window_size * 0.5 + 0.5;
+                const dy = (y - ycen) / window_size * 0.5 + 0.5;
+
+                return {
+                    x: dx * canvas.width,
+                    y: dy * canvas.width
+                };
+            }
+
+            let color = 0.2;
+            const themax = maxmax - 1;
+            const themin = Math.floor(themax / 2);
+
+            // Generate tiles
+            for (let minmin = 0.0; minmin <= themax; minmin += 0.4) {
+                const rad1 = minmin * minmin;
+                const rad2 = (minmin + 0.4) * (minmin + 0.4);
+
+                for (let n = 1; n < themax; n++) {
+                    for (let m = 1; m < themax; m++) {
+                        const rad = (n - themin) * (n - themin) + (m - themin) * (m - themin);
+
+                        if (rad >= rad1 && rad < rad2) {
+                            for (let t = 0; t < symmetry - 1; t++) {
+                                for (let r = t + 1; r < symmetry; r++) {
+                                    let x0 = (b[t][n] - b[r][m]) / (mm[r] - mm[t]);
+                                    let y0 = mm[t] * x0 + b[t][n];
+
+                                    const index = [];
+                                    let flag = false;
+
+                                    for (let i = 0; i < symmetry; i++) {
+                                        if (i !== t && i !== r) {
+                                            const dx = -x0 * vy[i] + (y0 - b[i][0]) * vx[i];
+                                            index[i] = Math.floor(-dx);
+                                            if (index[i] > maxmax - 3 || index[i] < 1) {
+                                                flag = true;
+                                            }
+                                        }
+                                    }
+
+                                    if (!flag) {
+                                        index[t] = n - 1;
+                                        index[r] = m - 1;
+
+                                        x0 = 0.0;
+                                        y0 = 0.0;
+                                        for (let i = 0; i < symmetry; i++) {
+                                            x0 += vx[i] * index[i];
+                                            y0 += vy[i] * index[i];
+                                        }
+
+                                        // Calculate color
+                                        color += 0.05;
+                                        if (color > 1.0) color = 0.2;
+
+                                        let tileColor = color;
+                                        if (colorByType) {
+                                            tileColor = 0.0;
+                                            for (let i = 0; i < symmetry; i++) {
+                                                tileColor += index[i];
+                                            }
+                                            while (tileColor > (symmetry - 1.0) / 2.0) {
+                                                tileColor -= (symmetry - 1.0) / 2.0;
+                                            }
+                                            tileColor = tileColor / ((symmetry - 1.0) / 2.0) * 0.8 + 0.1;
+                                            tileColor += Math.abs(vx[t] * vx[r] + vy[t] * vy[r]);
+                                            if (tileColor > 1.0) tileColor -= 1.0;
+                                        }
+
+                                        // Draw diamond
+                                        const points = [
+                                            plotPoint(x0, y0),
+                                            plotPoint(x0 + vx[t], y0 + vy[t]),
+                                            plotPoint(x0 + vx[t] + vx[r], y0 + vy[t] + vy[r]),
+                                            plotPoint(x0 + vx[r], y0 + vy[r])
+                                        ];
+
+                                        // Fill polygon
+                                        if (fillPolygons) {
+                                            ctx.beginPath();
+                                            ctx.moveTo(points[0].x, points[0].y);
+                                            for (let i = 1; i < points.length; i++) {
+                                                ctx.lineTo(points[i].x, points[i].y);
+                                            }
+                                            ctx.closePath();
+
+                                            const r = Math.floor(rcolour(tileColor) * 255);
+                                            const g = Math.floor(gcolour(tileColor) * 255);
+                                            const b = Math.floor(bcolour(tileColor) * 255);
+                                            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                                            ctx.fill();
+                                        }
+
+                                        // Draw outline
+                                        ctx.beginPath();
+                                        ctx.moveTo(points[0].x, points[0].y);
+                                        for (let i = 1; i < points.length; i++) {
+                                            ctx.lineTo(points[i].x, points[i].y);
+                                        }
+                                        ctx.closePath();
+                                        ctx.strokeStyle = '#333';
+                                        ctx.lineWidth = 0.5;
+                                        ctx.stroke();
+
+                                        // Draw midpoint decorations
+                                        if (midpointType > 0) {
+                                            const midx1 = x0 + vx[t] * 0.5;
+                                            const midy1 = y0 + vy[t] * 0.5;
+                                            const midx2 = x0 + vx[t] + vx[r] * 0.5;
+                                            const midy2 = y0 + vy[t] + vy[r] * 0.5;
+                                            const midx3 = x0 + vx[r] + vx[t] * 0.5;
+                                            const midy3 = y0 + vy[r] + vy[t] * 0.5;
+                                            const midx4 = x0 + vx[r] * 0.5;
+                                            const midy4 = y0 + vy[r] * 0.5;
+
+                                            const mid1 = plotPoint(midx1, midy1);
+                                            const mid2 = plotPoint(midx2, midy2);
+                                            const mid3 = plotPoint(midx3, midy3);
+                                            const mid4 = plotPoint(midx4, midy4);
+
+                                            ctx.strokeStyle = '#fff';
+                                            ctx.lineWidth = 1.5;
+
+                                            if (midpointType === 3) {
+                                                // Cross pattern
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid1.x, mid1.y);
+                                                ctx.lineTo(mid3.x, mid3.y);
+                                                ctx.stroke();
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid2.x, mid2.y);
+                                                ctx.lineTo(mid4.x, mid4.y);
+                                                ctx.stroke();
+                                            } else if (midpointType === 1) {
+                                                // Acute angle sides
+                                                const dx1 = midx1 - midx2;
+                                                const dy1 = midy1 - midy2;
+                                                const dist1 = dx1 * dx1 + dy1 * dy1;
+                                                const dx2 = midx2 - midx3;
+                                                const dy2 = midy2 - midy3;
+                                                const dist2 = dx2 * dx2 + dy2 * dy2;
+
+                                                if (dist1 > dist2) {
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid1.x, mid1.y);
+                                                    ctx.lineTo(mid4.x, mid4.y);
+                                                    ctx.stroke();
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid2.x, mid2.y);
+                                                    ctx.lineTo(mid3.x, mid3.y);
+                                                    ctx.stroke();
+                                                } else {
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid1.x, mid1.y);
+                                                    ctx.lineTo(mid2.x, mid2.y);
+                                                    ctx.stroke();
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid3.x, mid3.y);
+                                                    ctx.lineTo(mid4.x, mid4.y);
+                                                    ctx.stroke();
+                                                }
+                                            } else if (midpointType === 2) {
+                                                // Obtuse angle sides
+                                                const dx1 = midx1 - midx2;
+                                                const dy1 = midy1 - midy2;
+                                                const dist1 = dx1 * dx1 + dy1 * dy1;
+                                                const dx2 = midx2 - midx3;
+                                                const dy2 = midy2 - midy3;
+                                                const dist2 = dx2 * dx2 + dy2 * dy2;
+
+                                                if (dist1 > dist2) {
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid1.x, mid1.y);
+                                                    ctx.lineTo(mid2.x, mid2.y);
+                                                    ctx.stroke();
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid3.x, mid3.y);
+                                                    ctx.lineTo(mid4.x, mid4.y);
+                                                    ctx.stroke();
+                                                } else {
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid1.x, mid1.y);
+                                                    ctx.lineTo(mid4.x, mid4.y);
+                                                    ctx.stroke();
+                                                    ctx.beginPath();
+                                                    ctx.moveTo(mid2.x, mid2.y);
+                                                    ctx.lineTo(mid3.x, mid3.y);
+                                                    ctx.stroke();
+                                                }
+                                            } else if (midpointType === 4) {
+                                                // Rectangle
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid1.x, mid1.y);
+                                                ctx.lineTo(mid2.x, mid2.y);
+                                                ctx.stroke();
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid3.x, mid3.y);
+                                                ctx.lineTo(mid4.x, mid4.y);
+                                                ctx.stroke();
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid1.x, mid1.y);
+                                                ctx.lineTo(mid4.x, mid4.y);
+                                                ctx.stroke();
+                                                ctx.beginPath();
+                                                ctx.moveTo(mid2.x, mid2.y);
+                                                ctx.lineTo(mid3.x, mid3.y);
+                                                ctx.stroke();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Initial draw
+        resizeCanvas();
+    </script>
+</body>
+</html>
